@@ -1,0 +1,121 @@
+---
+title: "Online Advertisement AB Testing"
+author: "Jhan-Syuan Lin"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: pdf_document
+header-includes:
+    - \usepackage{setspace}\doublespacing
+fontsize: 12
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Business Setup
+Star Digital, a multimedia video service provider that spends over $1 million a year on advertising, has recently put more emphasis on online channels. In order to optimize resources, understanding the ROI for each media expenditure has been crucial to the company's spending choices. Star Digital created a carefully controlled experiment to evaluate the efficacy of its digital display advertising through online campaigns.
+
+Star Digital aimed to answer the following important questions through this experiment:
+
+* Is online advertising effective for Star Digital ?
+* Is there a frequency effect for advertising on purchase?
+* Which sites should Star Digital advertise on?
+
+This Summary covers the main issues, the experiment design, the dangers involved in causal inference, and analysis performed to address the problems.
+
+# Threats to Causal Inference
+
+* SUTVA Assumption: As there is no added value to the customer that would be offered only by displaying an advertisement that would attract customers' attention, we presume that the consumers would not be aware of being a part of the experiment.
+
+* Selection Bias: Star Digital chose the complete population for this experiment, avoiding selection bias, and assigned test and control groups at random. In addition, the population was divided into groups that had made purchases and those that had not gotten the dataset. A sample was then randomly selected from each category. Overall, they minimize the effects of selection bias due to the random nature of the selection process at both the treatment and control splits, as well as the selection of sample data. As part of our study, we perform a randomization check to confirm this further.
+
+# Data Exploration and Overview
+
+```{r library, results='hide', warning=FALSE, message=FALSE}
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(naniar)
+library(pwr)
+
+# Set working directory to source file location
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
+website = read_excel("Data.xls")
+```
+
+### Missing Value
+```{r, warning=FALSE}
+vis_miss(website)
+```
+
+There is no any missing value in this dataset.
+
+### Outlier Detection
+```{r}
+website <- website %>% rowwise() %>% mutate(tot_impressions = sum(imp_1, imp_2, imp_3, imp_4, imp_5, imp_6))
+boxplot(website$tot_impressions)
+```
+
+To inspect the outlier issue, we decide to sum up the impression across different sites and use this new feature to detect outliers. Although there are many potential outliers according to the boxplot, this is not the main focus of this project. We will proceed with our analysis of the original data.
+
+### Power Test
+```{r}
+tst_count = website %>% filter(test == 1) %>% select(id) %>% unique() %>% nrow()
+control_count = website %>% filter(test == 0) %>% select(id) %>% unique() %>% nrow()
+pwr.2p2n.test(n1=control_count , n2=tst_count , sig.level = .05 , power = .8)
+```
+
+The size of the treatment and control groups in the current trial are approximately 23K and 2.6K, respectively. We wanted to conduct a power test based on the current sample size to determine the minimum effect size that can be observed from this sample given a threshold of 0.05 of incorrectly rejecting the presumption that the two groups are indeed different and the probability of correctly rejecting the null hypothesis is set at 0.8. The minimum lift that may be noticed under the circumstances above is about 5.7%, which means that any increase below 5.7% should be handled carefully.
+
+### Randomization Check
+```{r}
+t.test(website$purchase ~ website$test)
+```
+
+Based on results of the t-test, the control group saw 7.92 ad impressions, whereas the test group saw 7.86 ad impressions. Although there is a small difference in the mean values, the p-value is larger than 0.05. This implies that the averages are not statistically different. Therefore, we can conclude that the randomization is valid.
+
+
+# Data Analysis
+
+### 1. Is online advertising effective for Star Digital? 
+```{r}
+summary(lm(purchase ~ test , website))
+```
+
+Compared to the control group who view charity advertisements, the treatment group seeing a relevant ad improves the likelihood of purchasing the membership package by 7.6%. Although the p-value is slightly greater than 5%, we can say this result is marginally significant and conclude that the ads are effective.
+
+### 2. Is there a frequency effect of advertising on purchase? In particular, the question is whether increasing the frequency of advertising increases the probability of purchase? 
+```{r}
+summary(lm(purchase ~ test * tot_impressions, website))
+```
+
+Looking at the effect of total impressions on purchase odds, we see a very significant p-value(3.49e-10 < 0.05). This shows evidence that the total number of ad impressions affects customers' decisions to purchase at Star Digital. The coefficient of the total impression term is 0.0025937, indicating an approximately 0.25% increase in purchasing at Star Digital given every unit increase in impression for the control group. This implies more online activity increases the frequency of purchasing at Star Digital, regardless of whether they are seeing Star Digital ads.
+
+As for the treatment group, the p-value for the interaction between being in the treatment group and total impressions is under 0.05 (0.0188). This signifies a piece of evidence that there is a difference in the effect of an additional ad impression between the treatment and control groups. And the coefficient on the interaction term is around 0.001, suggesting an 0.1% increment in purchase odds for the control group. 
+
+In conclusion, it appears that a higher frequency of advertising does increase the probability of purchase.
+
+### 3. Which sites should Star Digital advertise on? In particular, should it put its advertising dollars in Site 6 or in Sites 1 through 5? 
+
+```{r}
+website <- website %>% rowwise() %>% mutate(impressions1_5 = sum(imp_1, imp_2, imp_3, imp_4, imp_5))
+summary(lm(purchase ~ test * impressions1_5 + test * imp_6, website))
+```
+
+The p-value for both [test:impressions1_5] and [test:imp_6] are all smaller than 0.05, indicating that there is evidence that there is a difference in the effect of an additional ad impression between the treatment and control group for "site1 to site5" and "site 6".
+
+***Return on Investment (ROI) = ((Value of Purchase * Increase of Purchase) - Cost of Impression) / Cost of Impression***
+
+```{r}
+ROI_site1to5 = ((1200 * 0.0007301) - (25 / 1000)) / (25 / 1000)
+ROI_site1to5
+```
+
+
+```{r}
+ROI_site6 = ((1200 * 0.0014738) - (20 / 1000)) / (20/1000)
+ROI_site6
+```
+
+With the above assessment, we can conclude that Star Digital should put its advertising dollars in Site 6 because it has a higher ROI than Site 1_5.
